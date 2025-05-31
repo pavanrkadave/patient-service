@@ -37,7 +37,7 @@ jobs:
         run: ./mvnw test
 
       - name: Make build script executable
-        run: chmod +x build-docker.sh
+        run: chmod +x build.sh
 
       - name: Generate tag and version
         id: tag

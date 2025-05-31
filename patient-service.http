@@ -1,0 +1,17 @@
+### GET request to patient service to retrieve all patients
+GET http://localhost:8080/api/patients
+
+### POST request to patient service to create a new patient
+POST http://localhost:8080/api/patients
+Content-Type: application/json
+
+{
+  "firstName": "Pavan",
+  "lastName": "Hegde",
+  "email": "pavan@gmailcom",
+  "address": "7 Peter-Schneider-Straße, 96049 Bamberg, Germany",
+  "dateOfBirth": "1997-04-16"
+}
+
+### GET request to patient service to retrieve a patient by ID
+GET http://localhost:8080/api/patients/2741009a

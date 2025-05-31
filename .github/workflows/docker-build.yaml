@@ -20,7 +20,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           java-version: '24'
@@ -61,8 +61,8 @@ jobs:
       - name: Build Docker image using build script
         run: |
           # Temporarily modify the build script to use our image name
-          sed -i 's/IMAGE_NAME="pavanrkadave\/patient-service"/IMAGE_NAME="patient-service"/' build-docker.sh
-          ./build-docker.sh ${{ steps.tag.outputs.tag }}
+          sed -i 's/IMAGE_NAME="pavanrkadave\/patient-service"/IMAGE_NAME="patient-service"/' build.sh
+          ./build.sh ${{ steps.tag.outputs.tag }}
 
       - name: Tag image for GitHub Container Registry
         run: |

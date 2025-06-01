@@ -1,16 +1,13 @@
-name: Build and Push Docker Image
+name: Build and Scan Image on Push
 
 on:
   push:
-    branches: [ main, develop ]
-    tags: [ 'v*' ]
+    branches: [ main ]
   pull_request:
     branches: [ main ]
 
 env:
-  REGISTRY_GHCR: ghcr.io
-  IMAGE_NAME: patient-service
-  GHCR_IMAGE_NAME: ghcr.io/${{ github.repository }}
+  IMAGE_NAME: docker.io/pavanrkadave/patient-service
 
 jobs:
   build:
@@ -20,161 +17,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK
-        uses: actions/setup-java@v4
+      - name: Build Docker image
+        run: |
+          docker build -t $IMAGE_NAME:${{github.sha}} .
+
+      - name: Scan Docker image with Trivy
+        uses: aquasecurity/trivy-action@v0.30.0
         with:
-          java-version: '24'
-          distribution: 'temurin'
+          image-ref: $IMAGE_NAME:${{github.sha}}
+          format: 'sarif'
+          output: 'trivy-scan-results.sarif'
 
-      - name: Cache Maven dependencies
-        uses: actions/cache@v3
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
         with:
-          path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-m2
-
-      - name: Run tests
-        run: ./mvnw test
-
-      - name: Make build script executable
-        run: chmod +x build.sh
-
-      - name: Generate tag and version
-        id: tag
-        run: |
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
-            echo "tag=pr-${{ github.event.number }}" >> $GITHUB_OUTPUT
-            echo "version=pr-${{ github.event.number }}" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/}
-            echo "tag=${VERSION}" >> $GITHUB_OUTPUT
-            echo "version=${VERSION}" >> $GITHUB_OUTPUT
-            echo "is_release=true" >> $GITHUB_OUTPUT
-          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            echo "tag=latest" >> $GITHUB_OUTPUT
-            echo "version=latest" >> $GITHUB_OUTPUT
-          else
-            echo "tag=${{ github.ref_name }}-${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
-            echo "version=${{ github.ref_name }}-${GITHUB_SHA::8}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Build Docker image using build script
-        run: |
-          # Temporarily modify the build script to use our image name
-          sed -i 's/IMAGE_NAME="pavanrkadave\/patient-service"/IMAGE_NAME="patient-service"/' build.sh
-          ./build.sh ${{ steps.tag.outputs.tag }}
-
-      - name: Tag image for GitHub Container Registry
-        run: |
-          docker tag ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }} ${{ env.GHCR_IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
-          if [ "${{ steps.tag.outputs.tag }}" != "latest" ] && [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            docker tag ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }} ${{ env.GHCR_IMAGE_NAME }}:latest
-          fi
-
-      - name: Log in to GitHub Container Registry
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY_GHCR }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Push to GitHub Container Registry
-        if: github.event_name != 'pull_request'
-        run: |
-          docker push ${{ env.GHCR_IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
-          if [ "${{ steps.tag.outputs.tag }}" != "latest" ] && [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            docker push ${{ env.GHCR_IMAGE_NAME }}:latest
-          fi
-
-      - name: Export Docker image as tar
-        if: steps.tag.outputs.is_release == 'true'
-        run: |
-          mkdir -p artifacts
-          docker save ${{ env.GHCR_IMAGE_NAME }}:${{ steps.tag.outputs.tag }} | gzip > artifacts/patient-service-${{ steps.tag.outputs.version }}-docker-image.tar.gz
-          
-          # Create additional artifacts
-          echo "# Patient Service ${{ steps.tag.outputs.version }}" > artifacts/README.md
-          echo "" >> artifacts/README.md
-          echo "## Docker Image" >> artifacts/README.md
-          echo "- **GitHub Container Registry**: \`${{ env.GHCR_IMAGE_NAME }}:${{ steps.tag.outputs.tag }}\`" >> artifacts/README.md
-          echo "- **Build Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> artifacts/README.md
-          echo "- **Git Commit**: ${{ github.sha }}" >> artifacts/README.md
-          echo "" >> artifacts/README.md
-          echo "## Usage" >> artifacts/README.md
-          echo "\`\`\`bash" >> artifacts/README.md
-          echo "# Pull from GitHub Container Registry" >> artifacts/README.md
-          echo "docker pull ${{ env.GHCR_IMAGE_NAME }}:${{ steps.tag.outputs.tag }}" >> artifacts/README.md
-          echo "" >> artifacts/README.md
-          echo "# Or load from downloaded tar.gz" >> artifacts/README.md
-          echo "gunzip -c patient-service-${{ steps.tag.outputs.version }}-docker-image.tar.gz | docker load" >> artifacts/README.md
-          echo "" >> artifacts/README.md
-          echo "# Run the container" >> artifacts/README.md
-          echo "docker run -p 8080:8080 -e SPRING_PROFILES_ACTIVE=local ${{ env.GHCR_IMAGE_NAME }}:${{ steps.tag.outputs.tag }}" >> artifacts/README.md
-          echo "\`\`\`" >> artifacts/README.md
-
-      - name: Create Release
-        if: steps.tag.outputs.is_release == 'true'
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ steps.tag.outputs.version }}
-          name: Patient Service ${{ steps.tag.outputs.version }}
-          body: |
-            ## 🚀 Patient Service Release ${{ steps.tag.outputs.version }}
-            
-            ### 📦 Docker Image
-            - **GitHub Container Registry**: `${{ env.GHCR_IMAGE_NAME }}:${{ steps.tag.outputs.tag }}`
-            
-            ### 🛠️ Quick Start
-            ```bash
-            # Pull and run from GitHub Container Registry
-            docker pull ${{ env.GHCR_IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
-            docker run -p 8080:8080 -e SPRING_PROFILES_ACTIVE=local ${{ env.GHCR_IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
-            ```
-            
-            ### 📥 Offline Installation
-            Download the `patient-service-${{ steps.tag.outputs.version }}-docker-image.tar.gz` file and load it:
-            ```bash
-            gunzip -c patient-service-${{ steps.tag.outputs.version }}-docker-image.tar.gz | docker load
-            ```
-            
-            ### 📊 Build Information
-            - **Commit**: ${{ github.sha }}
-            - **Build Date**: ${{ steps.date.outputs.date }}
-            - **Java Version**: 17
-            
-            ---
-            *This release includes the Docker image both in GitHub Container Registry and as a downloadable artifact for offline use.*
-          files: |
-            artifacts/patient-service-${{ steps.tag.outputs.version }}-docker-image.tar.gz
-            artifacts/README.md
-
-      - name: Image scan (optional)
-        if: github.event_name != 'pull_request'
-        continue-on-error: true
-        run: |
-          # Install Trivy
-          sudo apt-get update
-          sudo apt-get install wget apt-transport-https gnupg lsb-release
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update
-          sudo apt-get install trivy
-          
-          # Scan image
-          trivy image --exit-code 0 --no-progress --format table ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
-
-      - name: Output image details
-        run: |
-          echo "🎉 Build completed!"
-          echo "📊 Image details:"
-          docker images | grep -E "(patient-service|ghcr.io)" | head -4
-          echo ""
-          if [ "${{ steps.tag.outputs.is_release }}" == "true" ]; then
-            echo "🚀 Release created with Docker image artifact!"
-            echo "📦 GitHub Container Registry: ${{ env.GHCR_IMAGE_NAME }}:${{ steps.tag.outputs.tag }}"
-            echo "📥 Offline artifact: patient-service-${{ steps.tag.outputs.version }}-docker-image.tar.gz"
-          else
-            echo "🚀 Image pushed to GitHub Container Registry:"
-            echo "   - ${{ env.GHCR_IMAGE_NAME }}:${{ steps.tag.outputs.tag }}"
-          fi
+          sarif_file: trivy-scan-results.sarif
